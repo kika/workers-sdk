@@ -18,7 +18,7 @@ import type { WorkerRegistry } from "../dev-registry";
 import type { SourceMapMetadata } from "../inspect";
 import type { ModuleCollector } from "../module-collection";
 import type { Entry } from "./entry";
-import type { CfModule } from "./worker";
+import type { CfModule, CfScriptFormat } from "./worker";
 
 export const COMMON_ESBUILD_OPTIONS = {
 	// Our workerd runtime uses the same V8 version as recent Chrome, which is highly ES2022 compliant: https://kangax.github.io/compat-table/es2016plus/
@@ -237,6 +237,7 @@ export async function bundleWorker(
 			name: "scheduled",
 			path: "templates/middleware/middleware-scheduled.ts",
 			active: targetConsumer === "dev" && !!testScheduled,
+			supports: ["modules", "service-worker"],
 		},
 		// In Miniflare 3, we bind the user's worker as a service binding in a
 		// special entry worker that handles things like injecting `Request.cf`,
@@ -257,6 +258,7 @@ export async function bundleWorker(
 			name: "miniflare3-json-error",
 			path: "templates/middleware/middleware-miniflare3-json-error.ts",
 			active: targetConsumer === "dev",
+			supports: ["modules", "service-worker"],
 		},
 		{
 			name: "serve-static-assets",
@@ -274,6 +276,7 @@ export async function bundleWorker(
 						  }
 						: {},
 			},
+			supports: ["modules", "service-worker"],
 		},
 		{
 			name: "multiworker-dev",
@@ -294,6 +297,7 @@ export async function bundleWorker(
 					])
 				),
 			},
+			supports: ["modules"],
 		},
 		{
 			name: "d1-beta",
@@ -302,6 +306,7 @@ export async function bundleWorker(
 			config: {
 				D1_IMPORTS: betaD1Shims,
 			},
+			supports: ["modules"],
 		},
 	];
 
@@ -311,6 +316,16 @@ export async function bundleWorker(
 		// We dynamically filter the middleware depending on where we are bundling for
 		(m) => m.active
 	);
+
+	// Check that the current worker format is supported by all the active middleware
+	for (const middleware of activeMiddleware) {
+		if (!middleware.supports.includes(entry.format)) {
+			throw new Error(
+				`Your Worker is written using the "${entry.format}" format, which isn't supported by the "${middleware.name}" middleware. To use "${middleware.name}" middleware, convert your Worker to the "${middleware.supports[0]}" format`
+			);
+		}
+	}
+
 	let inputEntry: EntryWithInject = entry;
 	if (
 		activeMiddleware.length > 0 ||
@@ -453,6 +468,7 @@ interface MiddlewareLoader {
 	active: boolean;
 	// This will be provided as a virtual module at config:middleware/${name}
 	config?: Record<string, unknown>;
+	supports: CfScriptFormat[];
 }
 
 async function applyMiddlewareLoaderFacade(
